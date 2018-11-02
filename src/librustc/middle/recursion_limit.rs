@@ -20,8 +20,8 @@ use syntax::ast;
 
 use rustc_data_structures::sync::Once;
 
-const RED_ZONE: usize = 1024*1024; // 1MB
-const STACK_PER_RECURSION: usize = 8 * 1024 * 1024; // 8MB
+const RED_ZONE: usize = 100*1024; // 100k
+const STACK_PER_RECURSION: usize = 1 * 1024 * 1024; // 1MB
 
 /// Grows the stack on demand to prevent stack overflow. Call this in strategic locations
 /// to "break up" recursive calls. E.g. almost any call to `visit_expr` or equivalent can benefit
