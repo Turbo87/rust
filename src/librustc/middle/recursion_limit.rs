@@ -28,7 +28,7 @@ const STACK_PER_RECURSION: usize = 1 * 1024 * 1024; // 1MB
 /// from this.
 ///
 /// Should not be sprinkled around carelessly, as it causes a little bit of overhead.
-pub fn guarantee_one_mb_stack_left<R, F: FnOnce() -> R>(
+pub fn ensure_sufficient_stack<R, F: FnOnce() -> R>(
     f: F
 ) -> R {
     stacker::maybe_grow(RED_ZONE, STACK_PER_RECURSION, f)

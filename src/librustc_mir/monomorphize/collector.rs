@@ -409,7 +409,7 @@ fn collect_items_rec<'a, 'tcx: 'a>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
                                                                recursion_depths));
             check_type_length_limit(tcx, instance);
 
-            rustc::middle::recursion_limit::guarantee_one_mb_stack_left(|| {
+            rustc::middle::recursion_limit::ensure_sufficient_stack(|| {
                 collect_neighbours(tcx, instance, &mut neighbors);
             });
         }
@@ -1180,7 +1180,7 @@ fn collect_miri<'a, 'tcx>(
         Some(AllocType::Memory(alloc)) => {
             trace!("collecting {:?} with {:#?}", alloc_id, alloc);
             for &((), inner) in alloc.relocations.values() {
-                rustc::middle::recursion_limit::guarantee_one_mb_stack_left(|| {
+                rustc::middle::recursion_limit::ensure_sufficient_stack(|| {
                     collect_miri(tcx, inner, output);
                 });
             }

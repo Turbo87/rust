@@ -540,7 +540,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
             p.record_query(Q::CATEGORY);
         });
 
-        let res = ::middle::recursion_limit::guarantee_one_mb_stack_left(|| job.start(self, |tcx| {
+        let res = ::middle::recursion_limit::ensure_sufficient_stack(|| job.start(self, |tcx| {
             if dep_node.kind.is_eval_always() {
                 tcx.dep_graph.with_eval_always_task(dep_node,
                                                     tcx,

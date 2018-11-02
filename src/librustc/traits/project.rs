@@ -33,7 +33,7 @@ use ty::subst::{Subst, Substs};
 use ty::{self, ToPredicate, ToPolyTraitRef, Ty, TyCtxt};
 use ty::fold::{TypeFoldable, TypeFolder};
 use util::common::FN_OUTPUT_NAME;
-use middle::recursion_limit::guarantee_one_mb_stack_left;
+use middle::recursion_limit::ensure_sufficient_stack;
 
 /// Depending on the stage of compilation, we want projection to be
 /// more or less conservative.
@@ -299,7 +299,7 @@ pub fn normalize_with_depth<'a, 'b, 'gcx, 'tcx, T>(
 {
     debug!("normalize_with_depth(depth={}, value={:?})", depth, value);
     let mut normalizer = AssociatedTypeNormalizer::new(selcx, param_env, cause, depth);
-    let result = guarantee_one_mb_stack_left(|| normalizer.fold(value));
+    let result = ensure_sufficient_stack(|| normalizer.fold(value));
     debug!("normalize_with_depth: depth={} result={:?} with {} obligations",
            depth, result, normalizer.obligations.len());
     debug!("normalize_with_depth: depth={} obligations={:?}",
@@ -384,7 +384,7 @@ impl<'a, 'b, 'gcx, 'tcx> TypeFolder<'gcx, 'tcx> for AssociatedTypeNormalizer<'a,
                         let generic_ty = self.tcx().type_of(def_id);
                         let concrete_ty = generic_ty.subst(self.tcx(), substs);
                         self.depth += 1;
-                        let folded_ty = guarantee_one_mb_stack_left(|| self.fold_ty(concrete_ty));
+                        let folded_ty = ensure_sufficient_stack(|| self.fold_ty(concrete_ty));
                         self.depth -= 1;
                         folded_ty
                     }

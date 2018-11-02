@@ -14,7 +14,7 @@ use build::{BlockAnd, BlockAndExtension, BlockFrame, Builder};
 use hair::*;
 use rustc::middle::region;
 use rustc::mir::*;
-use rustc::middle::recursion_limit::guarantee_one_mb_stack_left;
+use rustc::middle::recursion_limit::ensure_sufficient_stack;
 
 impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
     /// Compile `expr` into a fresh temporary. This is used when building
@@ -34,7 +34,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
         // this is the only place in mir building that we need to truly need to worry about
         // infinite recursion. Everything else does recurse, too, but it always gets broken up
         // at some point by inserting an intermediate temporary
-        guarantee_one_mb_stack_left(|| self.expr_as_temp(block, temp_lifetime, expr, mutability))
+        ensure_sufficient_stack(|| self.expr_as_temp(block, temp_lifetime, expr, mutability))
     }
 
     fn expr_as_temp(

@@ -50,7 +50,7 @@ use hir::GenericArg;
 use lint::builtin::{self, PARENTHESIZED_PARAMS_IN_TYPES_AND_MODULES,
                     ELIDED_LIFETIMES_IN_PATHS};
 use middle::cstore::CrateStore;
-use middle::recursion_limit::guarantee_one_mb_stack_left;
+use middle::recursion_limit::ensure_sufficient_stack;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_data_structures::indexed_vec::IndexVec;
 use rustc_data_structures::thin_vec::ThinVec;
@@ -4267,7 +4267,7 @@ impl<'a> LoweringContext<'a> {
         // just lowered from the expression
         let kind = match e.node {
             ExprKind::Paren(ref ex) => {
-                let mut ex = guarantee_one_mb_stack_left(|| self.lower_expr(ex));
+                let mut ex = ensure_sufficient_stack(|| self.lower_expr(ex));
                 // include parens in span, but only if it is a super-span.
                 if e.span.contains(ex.span) {
                     ex.span = e.span;
@@ -4446,7 +4446,7 @@ impl<'a> LoweringContext<'a> {
                 // add the attributes to the outer returned expr node
                 return self.expr_block(block, e.attrs.clone());
             },
-            _ => guarantee_one_mb_stack_left(|| self.lower_expr_kind(e)),
+            _ => ensure_sufficient_stack(|| self.lower_expr_kind(e)),
         };
 
         let LoweredNodeId { node_id, hir_id } = self.lower_node_id(e.id);

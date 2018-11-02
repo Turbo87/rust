@@ -42,7 +42,7 @@ use hir::def_id::DefId;
 use infer;
 use infer::{InferCtxt, InferOk, TypeFreshener};
 use middle::lang_items;
-use middle::recursion_limit::guarantee_one_mb_stack_left;
+use middle::recursion_limit::ensure_sufficient_stack;
 use mir::interpret::GlobalId;
 use ty::fast_reject;
 use ty::relate::TypeRelation;
@@ -2856,7 +2856,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             };
 
             let cause = obligation.derived_cause(BuiltinDerivedObligation);
-            guarantee_one_mb_stack_left(|| {
+            ensure_sufficient_stack(|| {
                 self.collect_predicates_for_types(
                     obligation.param_env,
                     cause,
@@ -2906,7 +2906,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         nested: ty::Binder<Vec<Ty<'tcx>>>,
     ) -> VtableAutoImplData<PredicateObligation<'tcx>> {
         debug!("vtable_auto_impl: nested={:?}", nested);
-        guarantee_one_mb_stack_left(|| {
+        ensure_sufficient_stack(|| {
 
             let cause = obligation.derived_cause(BuiltinDerivedObligation);
             let mut obligations = self.collect_predicates_for_types(
@@ -2959,7 +2959,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             let (substs, placeholder_map) = this.rematch_impl(impl_def_id, obligation, snapshot);
             debug!("confirm_impl_candidate: substs={:?}", substs);
             let cause = obligation.derived_cause(ImplDerivedObligation);
-            guarantee_one_mb_stack_left(|| this.vtable_impl(
+            ensure_sufficient_stack(|| this.vtable_impl(
                 impl_def_id,
                 substs,
                 cause,
@@ -3092,7 +3092,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         let Normalized {
             value: trait_ref,
             obligations,
-        } = guarantee_one_mb_stack_left(|| project::normalize_with_depth(
+        } = ensure_sufficient_stack(|| project::normalize_with_depth(
             self,
             obligation.param_env,
             obligation.cause.clone(),
@@ -3175,7 +3175,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         let Normalized {
             value: trait_ref,
             mut obligations,
-        } = guarantee_one_mb_stack_left(|| normalize_with_depth(
+        } = ensure_sufficient_stack(|| normalize_with_depth(
             self,
             obligation.param_env,
             obligation.cause.clone(),
@@ -3228,7 +3228,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         let Normalized {
             value: trait_ref,
             mut obligations,
-        } = guarantee_one_mb_stack_left(|| normalize_with_depth(
+        } = ensure_sufficient_stack(|| normalize_with_depth(
             self,
             obligation.param_env,
             obligation.cause.clone(),
@@ -3486,7 +3486,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                 nested.extend(obligations);
 
                 // Construct the nested Field<T>: Unsize<Field<U>> predicate.
-                nested.push(guarantee_one_mb_stack_left(|| {
+                nested.push(ensure_sufficient_stack(|| {
                     tcx.predicate_for_trait_def(
                         obligation.param_env,
                         obligation.cause.clone(),
@@ -3520,7 +3520,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                 nested.extend(obligations);
 
                 // Construct the nested T: Unsize<U> predicate.
-                nested.push(guarantee_one_mb_stack_left(|| {
+                nested.push(ensure_sufficient_stack(|| {
                     tcx.predicate_for_trait_def(
                         obligation.param_env,
                         obligation.cause.clone(),
@@ -3602,7 +3602,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         let Normalized {
             value: impl_trait_ref,
             obligations: mut nested_obligations,
-        } = guarantee_one_mb_stack_left(|| project::normalize_with_depth(
+        } = ensure_sufficient_stack(|| project::normalize_with_depth(
             self,
             obligation.param_env,
             obligation.cause.clone(),
