@@ -8,12 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// Recursion limit.
-//
-// There are various parts of the compiler that must impose arbitrary limits
-// on how deeply they recurse to prevent stack overflow. Users can override
-// this via an attribute on the crate like `#![recursion_limit="22"]`. This pass
-// just peeks and looks for that attribute.
+//! Recursion limit.
+//!
+//! There are various parts of the compiler that must impose arbitrary limits
+//! on how deeply they recurse to prevent stack overflow. Users can override
+//! this via an attribute on the crate like `#![recursion_limit="22"]`. This pass
+//! just peeks and looks for that attribute.
 
 use session::Session;
 use syntax::ast;
@@ -23,6 +23,11 @@ use rustc_data_structures::sync::Once;
 const RED_ZONE: usize = 1024*1024; // 1MB
 const STACK_PER_RECURSION: usize = 8 * 1024 * 1024; // 8MB
 
+/// Grows the stack on demand to prevent stack overflow. Call this in strategic locations
+/// to "break up" recursive calls. E.g. almost any call to `visit_expr` or equivalent can benefit
+/// from this.
+///
+/// Should not be sprinkled around carelessly, as it causes a little bit of overhead.
 pub fn guarantee_one_mb_stack_left<R, F: FnOnce() -> R>(
     f: F
 ) -> R {
