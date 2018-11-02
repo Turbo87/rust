@@ -106,6 +106,7 @@ extern crate serialize as rustc_serialize; // used by deriving
 extern crate rustc_apfloat;
 extern crate byteorder;
 extern crate backtrace;
+extern crate stacker;
 
 #[macro_use]
 extern crate smallvec;

@@ -20,6 +20,15 @@ use syntax::ast;
 
 use rustc_data_structures::sync::Once;
 
+const RED_ZONE: usize = 1024*1024; // 1MB
+const STACK_PER_RECURSION: usize = 8 * 1024 * 1024; // 8MB
+
+pub fn guarantee_one_mb_stack_left<R, F: FnOnce() -> R>(
+    f: F
+) -> R {
+    stacker::maybe_grow(RED_ZONE, STACK_PER_RECURSION, f)
+}
+
 pub fn update_limits(sess: &Session, krate: &ast::Crate) {
     update_limit(sess, krate, &sess.recursion_limit, "recursion_limit",
                  "recursion limit", 64);

@@ -50,6 +50,7 @@ use hir::GenericArg;
 use lint::builtin::{self, PARENTHESIZED_PARAMS_IN_TYPES_AND_MODULES,
                     ELIDED_LIFETIMES_IN_PATHS};
 use middle::cstore::CrateStore;
+use middle::recursion_limit::guarantee_one_mb_stack_left;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_data_structures::indexed_vec::IndexVec;
 use rustc_data_structures::thin_vec::ThinVec;
@@ -3659,8 +3660,8 @@ impl<'a> LoweringContext<'a> {
         })
     }
 
-    fn lower_expr(&mut self, e: &Expr) -> hir::Expr {
-        let kind = match e.node {
+    fn lower_expr_kind(&mut self, e: &Expr) -> hir::ExprKind {
+        match e.node {
             ExprKind::Box(ref inner) => hir::ExprKind::Box(P(self.lower_expr(inner))),
             ExprKind::ObsoleteInPlace(..) => {
                 self.sess.abort_if_errors();
@@ -3959,19 +3960,11 @@ impl<'a> LoweringContext<'a> {
                 let struct_path = self.std_path(e.span, &struct_path, None, is_unit);
                 let struct_path = hir::QPath::Resolved(None, P(struct_path));
 
-                let LoweredNodeId { node_id, hir_id } = self.lower_node_id(e.id);
-
-                return hir::Expr {
-                    id: node_id,
-                    hir_id,
-                    node: if is_unit {
+                if is_unit {
                         hir::ExprKind::Path(struct_path)
                     } else {
                         hir::ExprKind::Struct(struct_path, fields, None)
-                    },
-                    span: e.span,
-                    attrs: e.attrs.clone(),
-                };
+            }
             }
             ExprKind::Path(ref qself, ref path) => {
                 let qpath = self.lower_qpath(
@@ -4050,18 +4043,7 @@ impl<'a> LoweringContext<'a> {
                 fields.iter().map(|x| self.lower_field(x)).collect(),
                 maybe_expr.as_ref().map(|x| P(self.lower_expr(x))),
             ),
-            ExprKind::Paren(ref ex) => {
-                let mut ex = self.lower_expr(ex);
-                // include parens in span, but only if it is a super-span.
-                if e.span.contains(ex.span) {
-                    ex.span = e.span;
-                }
-                // merge attributes into the inner expression.
-                let mut attrs = e.attrs.clone();
-                attrs.extend::<Vec<_>>(ex.attrs.into());
-                ex.attrs = attrs;
-                return ex;
-            }
+            ExprKind::Paren(_) => bug!("parens are handled in `lower_expr`"),
 
             ExprKind::Yield(ref opt_expr) => {
                 self.is_generator = true;
@@ -4172,6 +4154,128 @@ impl<'a> LoweringContext<'a> {
                 // add attributes to the outer returned expr node
                 loop_expr
             }
+
+            ExprKind::ForLoop(..) => bug!(),
+
+            // Desugar ExprKind::Try
+            // From: `<expr>?`
+            ExprKind::Try(ref sub_expr) => {
+                // to:
+                //
+                // match Try::into_result(<expr>) {
+                //     Ok(val) => #[allow(unreachable_code)] val,
+                //     Err(err) => #[allow(unreachable_code)]
+                //                 // If there is an enclosing `catch {...}`
+                //                 break 'catch_target Try::from_error(From::from(err)),
+                //                 // Otherwise
+                //                 return Try::from_error(From::from(err)),
+                // }
+
+                let unstable_span =
+                    self.allow_internal_unstable(CompilerDesugaringKind::QuestionMark, e.span);
+
+                // Try::into_result(<expr>)
+                let discr = {
+                    // expand <expr>
+                    let sub_expr = self.lower_expr(sub_expr);
+
+                    let path = &["ops", "Try", "into_result"];
+                    let path = P(self.expr_std_path(
+                            unstable_span, path, None, ThinVec::new()));
+                    P(self.expr_call(e.span, path, hir_vec![sub_expr]))
+                };
+
+                // #[allow(unreachable_code)]
+                let attr = {
+                    // allow(unreachable_code)
+                    let allow = {
+                        let allow_ident = Ident::from_str("allow").with_span_pos(e.span);
+                        let uc_ident = Ident::from_str("unreachable_code").with_span_pos(e.span);
+                        let uc_nested = attr::mk_nested_word_item(uc_ident);
+                        attr::mk_list_item(e.span, allow_ident, vec![uc_nested])
+                    };
+                    attr::mk_spanned_attr_outer(e.span, attr::mk_attr_id(), allow)
+                };
+                let attrs = vec![attr];
+
+                // Ok(val) => #[allow(unreachable_code)] val,
+                let ok_arm = {
+                    let val_ident = self.str_to_ident("val");
+                    let val_pat = self.pat_ident(e.span, val_ident);
+                    let val_expr = P(self.expr_ident_with_attrs(
+                        e.span,
+                        val_ident,
+                        val_pat.id,
+                        ThinVec::from(attrs.clone()),
+                    ));
+                    let ok_pat = self.pat_ok(e.span, val_pat);
+
+                    self.arm(hir_vec![ok_pat], val_expr)
+                };
+
+                // Err(err) => #[allow(unreachable_code)]
+                //             return Try::from_error(From::from(err)),
+                let err_arm = {
+                    let err_ident = self.str_to_ident("err");
+                    let err_local = self.pat_ident(e.span, err_ident);
+                    let from_expr = {
+                        let path = &["convert", "From", "from"];
+                        let from = P(self.expr_std_path(
+                                e.span, path, None, ThinVec::new()));
+                        let err_expr = self.expr_ident(e.span, err_ident, err_local.id);
+
+                        self.expr_call(e.span, from, hir_vec![err_expr])
+                    };
+                    let from_err_expr =
+                        self.wrap_in_try_constructor("from_error", from_expr, unstable_span);
+                    let thin_attrs = ThinVec::from(attrs);
+                    let catch_scope = self.catch_scopes.last().map(|x| *x);
+                    let ret_expr = if let Some(catch_node) = catch_scope {
+                        P(self.expr(
+                            e.span,
+                            hir::ExprKind::Break(
+                                hir::Destination {
+                                    label: None,
+                                    target_id: Ok(catch_node),
+                                },
+                                Some(from_err_expr),
+                            ),
+                            thin_attrs,
+                        ))
+                    } else {
+                        P(self.expr(e.span, hir::ExprKind::Ret(Some(from_err_expr)), thin_attrs))
+                    };
+
+                    let err_pat = self.pat_err(e.span, err_local);
+                    self.arm(hir_vec![err_pat], ret_expr)
+                };
+
+                hir::ExprKind::Match(
+                    discr,
+                    hir_vec![err_arm, ok_arm],
+                    hir::MatchSource::TryDesugar,
+                )
+            }
+
+            ExprKind::Mac(_) => panic!("Shouldn't exist here"),
+        }
+    }
+
+
+    fn lower_expr(&mut self, e: &Expr) -> hir::Expr {
+        // parens and for loops have some custom desugaring going on where the node ids aren't
+        // just lowered from the expression
+        let kind = match e.node {
+            ExprKind::Paren(ref ex) => {
+                let mut ex = guarantee_one_mb_stack_left(|| self.lower_expr(ex));
+                // include parens in span, but only if it is a super-span.
+                if e.span.contains(ex.span) {
+                    ex.span = e.span;
+                }
+                // merge attributes into the inner expression.
+                ex.attrs.extend(e.attrs.iter().cloned());
+                return ex;
+            },
 
             // Desugar ExprForLoop
             // From: `[opt_ident]: for <pat> in <head> <body>`
@@ -4341,109 +4445,8 @@ impl<'a> LoweringContext<'a> {
                 let block = P(self.block_all(e.span, hir_vec![let_stmt], Some(result)));
                 // add the attributes to the outer returned expr node
                 return self.expr_block(block, e.attrs.clone());
-            }
-
-            // Desugar ExprKind::Try
-            // From: `<expr>?`
-            ExprKind::Try(ref sub_expr) => {
-                // to:
-                //
-                // match Try::into_result(<expr>) {
-                //     Ok(val) => #[allow(unreachable_code)] val,
-                //     Err(err) => #[allow(unreachable_code)]
-                //                 // If there is an enclosing `catch {...}`
-                //                 break 'catch_target Try::from_error(From::from(err)),
-                //                 // Otherwise
-                //                 return Try::from_error(From::from(err)),
-                // }
-
-                let unstable_span =
-                    self.allow_internal_unstable(CompilerDesugaringKind::QuestionMark, e.span);
-
-                // Try::into_result(<expr>)
-                let discr = {
-                    // expand <expr>
-                    let sub_expr = self.lower_expr(sub_expr);
-
-                    let path = &["ops", "Try", "into_result"];
-                    let path = P(self.expr_std_path(
-                            unstable_span, path, None, ThinVec::new()));
-                    P(self.expr_call(e.span, path, hir_vec![sub_expr]))
-                };
-
-                // #[allow(unreachable_code)]
-                let attr = {
-                    // allow(unreachable_code)
-                    let allow = {
-                        let allow_ident = Ident::from_str("allow").with_span_pos(e.span);
-                        let uc_ident = Ident::from_str("unreachable_code").with_span_pos(e.span);
-                        let uc_nested = attr::mk_nested_word_item(uc_ident);
-                        attr::mk_list_item(e.span, allow_ident, vec![uc_nested])
-                    };
-                    attr::mk_spanned_attr_outer(e.span, attr::mk_attr_id(), allow)
-                };
-                let attrs = vec![attr];
-
-                // Ok(val) => #[allow(unreachable_code)] val,
-                let ok_arm = {
-                    let val_ident = self.str_to_ident("val");
-                    let val_pat = self.pat_ident(e.span, val_ident);
-                    let val_expr = P(self.expr_ident_with_attrs(
-                        e.span,
-                        val_ident,
-                        val_pat.id,
-                        ThinVec::from(attrs.clone()),
-                    ));
-                    let ok_pat = self.pat_ok(e.span, val_pat);
-
-                    self.arm(hir_vec![ok_pat], val_expr)
-                };
-
-                // Err(err) => #[allow(unreachable_code)]
-                //             return Try::from_error(From::from(err)),
-                let err_arm = {
-                    let err_ident = self.str_to_ident("err");
-                    let err_local = self.pat_ident(e.span, err_ident);
-                    let from_expr = {
-                        let path = &["convert", "From", "from"];
-                        let from = P(self.expr_std_path(
-                                e.span, path, None, ThinVec::new()));
-                        let err_expr = self.expr_ident(e.span, err_ident, err_local.id);
-
-                        self.expr_call(e.span, from, hir_vec![err_expr])
-                    };
-                    let from_err_expr =
-                        self.wrap_in_try_constructor("from_error", from_expr, unstable_span);
-                    let thin_attrs = ThinVec::from(attrs);
-                    let catch_scope = self.catch_scopes.last().map(|x| *x);
-                    let ret_expr = if let Some(catch_node) = catch_scope {
-                        P(self.expr(
-                            e.span,
-                            hir::ExprKind::Break(
-                                hir::Destination {
-                                    label: None,
-                                    target_id: Ok(catch_node),
-                                },
-                                Some(from_err_expr),
-                            ),
-                            thin_attrs,
-                        ))
-                    } else {
-                        P(self.expr(e.span, hir::ExprKind::Ret(Some(from_err_expr)), thin_attrs))
-                    };
-
-                    let err_pat = self.pat_err(e.span, err_local);
-                    self.arm(hir_vec![err_pat], ret_expr)
-                };
-
-                hir::ExprKind::Match(
-                    discr,
-                    hir_vec![err_arm, ok_arm],
-                    hir::MatchSource::TryDesugar,
-                )
-            }
-
-            ExprKind::Mac(_) => panic!("Shouldn't exist here"),
+            },
+            _ => guarantee_one_mb_stack_left(|| self.lower_expr_kind(e)),
         };
 
         let LoweredNodeId { node_id, hir_id } = self.lower_node_id(e.id);

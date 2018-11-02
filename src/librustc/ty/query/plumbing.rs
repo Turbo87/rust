@@ -540,7 +540,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
             p.record_query(Q::CATEGORY);
         });
 
-        let res = job.start(self, |tcx| {
+        let res = ::middle::recursion_limit::guarantee_one_mb_stack_left(|| job.start(self, |tcx| {
             if dep_node.kind.is_eval_always() {
                 tcx.dep_graph.with_eval_always_task(dep_node,
                                                     tcx,
@@ -552,7 +552,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
                                         key,
                                         Q::compute)
             }
-        });
+        }));
 
         self.sess.profiler(|p| p.end_activity(Q::CATEGORY));
         profq_msg!(self, ProfileQueriesMsg::ProviderEnd);

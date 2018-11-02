@@ -193,16 +193,22 @@ fn dtorck_constraint_for_ty<'a, 'gcx, 'tcx>(
 
         ty::Array(ety, _) | ty::Slice(ety) => {
             // single-element containers, behave like their element
-            dtorck_constraint_for_ty(tcx, span, for_ty, depth + 1, ety)
+            rustc::middle::recursion_limit::guarantee_one_mb_stack_left(|| {
+                dtorck_constraint_for_ty(tcx, span, for_ty, depth + 1, ety)
+            })
         }
 
         ty::Tuple(tys) => tys.iter()
-            .map(|ty| dtorck_constraint_for_ty(tcx, span, for_ty, depth + 1, ty))
+            .map(|ty| rustc::middle::recursion_limit::guarantee_one_mb_stack_left(|| {
+                dtorck_constraint_for_ty(tcx, span, for_ty, depth + 1, ty)
+            }))
             .collect(),
 
         ty::Closure(def_id, substs) => substs
             .upvar_tys(def_id, tcx)
-            .map(|ty| dtorck_constraint_for_ty(tcx, span, for_ty, depth + 1, ty))
+            .map(|ty| rustc::middle::recursion_limit::guarantee_one_mb_stack_left(|| {
+                dtorck_constraint_for_ty(tcx, span, for_ty, depth + 1, ty)
+            }))
             .collect(),
 
         ty::Generator(def_id, substs, _movability) => {

@@ -94,6 +94,7 @@ use rustc::infer::{self, InferCtxt, InferOk, RegionVariableOrigin};
 use rustc::infer::opaque_types::OpaqueTypeDecl;
 use rustc::infer::type_variable::{TypeVariableOrigin};
 use rustc::middle::region;
+use rustc::middle::recursion_limit::guarantee_one_mb_stack_left;
 use rustc::mir::interpret::{ConstValue, GlobalId};
 use rustc::ty::subst::{CanonicalUserSubsts, UnpackedKind, Subst, Substs,
                        UserSelfTy, UserSubsts};
@@ -3754,7 +3755,7 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
         self.diverges.set(Diverges::Maybe);
         self.has_errors.set(false);
 
-        let ty = self.check_expr_kind(expr, expected, needs);
+        let ty = guarantee_one_mb_stack_left(|| self.check_expr_kind(expr, expected, needs));
 
         // Warn for non-block expressions with diverging children.
         match expr.node {
