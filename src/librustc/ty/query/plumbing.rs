@@ -205,7 +205,7 @@ impl<'a, 'tcx, Q: QueryDescription<'tcx>> JobOwner<'a, 'tcx, Q> {
 
             // Use the ImplicitCtxt while we execute the query
             tls::enter_context(&new_icx, |_| {
-                compute(tcx)
+                ::middle::recursion_limit::ensure_sufficient_stack(|| compute(tcx))
             })
         });
 
@@ -540,7 +540,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
             p.record_query(Q::CATEGORY);
         });
 
-        let res = ::middle::recursion_limit::ensure_sufficient_stack(|| job.start(self, |tcx| {
+        let res = job.start(self, |tcx| {
             if dep_node.kind.is_eval_always() {
                 tcx.dep_graph.with_eval_always_task(dep_node,
                                                     tcx,
@@ -552,7 +552,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
                                         key,
                                         Q::compute)
             }
-        }));
+        });
 
         self.sess.profiler(|p| p.end_activity(Q::CATEGORY));
         profq_msg!(self, ProfileQueriesMsg::ProviderEnd);
