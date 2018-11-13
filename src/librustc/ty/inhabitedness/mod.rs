@@ -14,6 +14,7 @@ use ty::{AdtDef, VariantDef, FieldDef, Ty, TyS};
 use ty::{DefId, Substs};
 use ty::{AdtKind, Visibility};
 use ty::TyKind::*;
+use middle::recursion_limit::ensure_sufficient_stack;
 
 pub use self::def_id_forest::DefIdForest;
 
@@ -249,7 +250,9 @@ impl<'a, 'gcx, 'tcx> TyS<'tcx> {
                         tcx.sess.fatal(&error);
                     }
                 }
-                let ret = def.uninhabited_from(visited, tcx, substs);
+                let ret = ensure_sufficient_stack(|| {
+                    def.uninhabited_from(visited, tcx, substs)
+                });
                 let substs_set = visited.get_mut(&def.did).unwrap();
                 substs_set.remove(substs);
                 ret

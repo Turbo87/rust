@@ -205,7 +205,7 @@ impl<'a, 'tcx, Q: QueryDescription<'tcx>> JobOwner<'a, 'tcx, Q> {
 
             // Use the ImplicitCtxt while we execute the query
             tls::enter_context(&new_icx, |_| {
-                compute(tcx)
+                ::middle::recursion_limit::ensure_sufficient_stack(|| compute(tcx))
             })
         });
 

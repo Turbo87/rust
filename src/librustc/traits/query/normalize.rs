@@ -21,6 +21,7 @@ use traits::{Obligation, ObligationCause, PredicateObligation, Reveal};
 use ty::fold::{TypeFoldable, TypeFolder};
 use ty::subst::{Subst, Substs};
 use ty::{self, Ty, TyCtxt};
+use middle::recursion_limit::ensure_sufficient_stack;
 
 use super::NoSolution;
 
@@ -131,7 +132,7 @@ impl<'cx, 'gcx, 'tcx> TypeFolder<'gcx, 'tcx> for QueryNormalizer<'cx, 'gcx, 'tcx
                                 ty
                             );
                         }
-                        let folded_ty = self.fold_ty(concrete_ty);
+                        let folded_ty = ensure_sufficient_stack(|| self.fold_ty(concrete_ty));
                         self.anon_depth -= 1;
                         folded_ty
                     }

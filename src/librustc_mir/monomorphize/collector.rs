@@ -409,7 +409,9 @@ fn collect_items_rec<'a, 'tcx: 'a>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
                                                                recursion_depths));
             check_type_length_limit(tcx, instance);
 
-            collect_neighbours(tcx, instance, &mut neighbors);
+            rustc::middle::recursion_limit::ensure_sufficient_stack(|| {
+                collect_neighbours(tcx, instance, &mut neighbors);
+            });
         }
         MonoItem::GlobalAsm(..) => {
             recursion_depth_reset = None;
@@ -1178,7 +1180,9 @@ fn collect_miri<'a, 'tcx>(
         Some(AllocType::Memory(alloc)) => {
             trace!("collecting {:?} with {:#?}", alloc_id, alloc);
             for &((), inner) in alloc.relocations.values() {
-                collect_miri(tcx, inner, output);
+                rustc::middle::recursion_limit::ensure_sufficient_stack(|| {
+                    collect_miri(tcx, inner, output);
+                });
             }
         },
         Some(AllocType::Function(fn_instance)) => {
