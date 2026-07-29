@@ -488,120 +488,127 @@ fn map_lib_features(
                 return;
             }
 
-            // This is an early exit -- all the attributes we're concerned with must contain this:
-            // * rustc_const_unstable(
-            // * unstable(
-            // * stable(
-            if !contents.contains("stable(") {
-                return;
-            }
-
-            let handle_issue_none = |s| match s {
-                "none" => None,
-                issue => {
-                    let n = issue.parse().expect("issue number is not a valid integer");
-                    assert_ne!(n, 0, "\"none\" should be used when there is no issue, not \"0\"");
-                    NonZeroU32::new(n)
-                }
-            };
-            let mut becoming_feature: Option<(&str, Feature)> = None;
-            let mut iter_lines = contents.lines().enumerate().peekable();
-            while let Some((i, line)) = iter_lines.next() {
-                macro_rules! err {
-                    ($msg:expr) => {{
-                        mf(Err($msg), file, i + 1);
-                        continue;
-                    }};
-                }
-
-                // exclude commented out lines
-                if static_regex!(r"^\s*//").is_match(line) {
-                    continue;
-                }
-
-                if let Some((name, ref mut f)) = becoming_feature {
-                    if f.tracking_issue.is_none() {
-                        f.tracking_issue = find_attr_val(line, "issue").and_then(handle_issue_none);
-                    }
-                    if line.ends_with(']') {
-                        mf(Ok((name, f.clone())), file, i + 1);
-                    } else if !line.ends_with(',') && !line.ends_with('\\') && !line.ends_with('"')
-                    {
-                        // We need to bail here because we might have missed the
-                        // end of a stability attribute above because the ']'
-                        // might not have been at the end of the line.
-                        // We could then get into the very unfortunate situation that
-                        // we continue parsing the file assuming the current stability
-                        // attribute has not ended, and ignoring possible feature
-                        // attributes in the process.
-                        err!("malformed stability attribute");
-                    } else {
-                        continue;
-                    }
-                }
-                becoming_feature = None;
-                if line.contains("rustc_const_unstable(") {
-                    // `const fn` features are handled specially.
-                    let feature_name = match find_attr_val(line, "feature").or_else(|| {
-                        iter_lines.peek().and_then(|next| find_attr_val(next.1, "feature"))
-                    }) {
-                        Some(name) => name,
-                        None => err!("malformed stability attribute: missing `feature` key"),
-                    };
-                    let feature = Feature {
-                        level: Status::Unstable,
-                        since: None,
-                        has_gate_test: false,
-                        tracking_issue: find_attr_val(line, "issue").and_then(handle_issue_none),
-                        file: file.to_path_buf(),
-                        line: i + 1,
-                        description: None,
-                    };
-                    mf(Ok((feature_name, feature)), file, i + 1);
-                    continue;
-                }
-                let level = if line.contains("[unstable(") {
-                    Status::Unstable
-                } else if line.contains("[stable(") {
-                    Status::Accepted
-                } else {
-                    continue;
-                };
-                let feature_name = match find_attr_val(line, "feature")
-                    .or_else(|| iter_lines.peek().and_then(|next| find_attr_val(next.1, "feature")))
-                {
-                    Some(name) => name,
-                    None => err!("malformed stability attribute: missing `feature` key"),
-                };
-                let since = match find_attr_val(line, "since").map(|x| x.parse()) {
-                    Some(Ok(since)) => Some(since),
-                    Some(Err(_err)) => {
-                        err!("malformed stability attribute: can't parse `since` key");
-                    }
-                    None if level == Status::Accepted => {
-                        err!("malformed stability attribute: missing the `since` key");
-                    }
-                    None => None,
-                };
-                let tracking_issue = find_attr_val(line, "issue").and_then(handle_issue_none);
-
-                let feature = Feature {
-                    level,
-                    since,
-                    has_gate_test: false,
-                    tracking_issue,
-                    file: file.to_path_buf(),
-                    line: i + 1,
-                    description: None,
-                };
-                if line.contains(']') {
-                    mf(Ok((feature_name, feature)), file, i + 1);
-                } else {
-                    becoming_feature = Some((feature_name, feature));
-                }
-            }
+            parse_lib_features(file, contents, mf);
         },
     );
+}
+
+fn parse_lib_features(
+    file: &Path,
+    contents: &str,
+    mf: &mut (dyn Send + Sync + FnMut(Result<(&str, Feature), &str>, &Path, usize)),
+) {
+    // This is an early exit -- all the attributes we're concerned with must contain this:
+    // * rustc_const_unstable(
+    // * unstable(
+    // * stable(
+    if !contents.contains("stable(") {
+        return;
+    }
+
+    let handle_issue_none = |s| match s {
+        "none" => None,
+        issue => {
+            let n = issue.parse().expect("issue number is not a valid integer");
+            assert_ne!(n, 0, "\"none\" should be used when there is no issue, not \"0\"");
+            NonZeroU32::new(n)
+        }
+    };
+    let mut becoming_feature: Option<(&str, Feature)> = None;
+    let mut iter_lines = contents.lines().enumerate().peekable();
+    while let Some((i, line)) = iter_lines.next() {
+        macro_rules! err {
+            ($msg:expr) => {{
+                mf(Err($msg), file, i + 1);
+                continue;
+            }};
+        }
+
+        // exclude commented out lines
+        if static_regex!(r"^\s*//").is_match(line) {
+            continue;
+        }
+
+        if let Some((name, ref mut f)) = becoming_feature {
+            if f.tracking_issue.is_none() {
+                f.tracking_issue = find_attr_val(line, "issue").and_then(handle_issue_none);
+            }
+            if line.ends_with(']') {
+                mf(Ok((name, f.clone())), file, i + 1);
+            } else if !line.ends_with(',') && !line.ends_with('\\') && !line.ends_with('"') {
+                // We need to bail here because we might have missed the
+                // end of a stability attribute above because the ']'
+                // might not have been at the end of the line.
+                // We could then get into the very unfortunate situation that
+                // we continue parsing the file assuming the current stability
+                // attribute has not ended, and ignoring possible feature
+                // attributes in the process.
+                err!("malformed stability attribute");
+            } else {
+                continue;
+            }
+        }
+        becoming_feature = None;
+        if line.contains("rustc_const_unstable(") {
+            // `const fn` features are handled specially.
+            let feature_name = match find_attr_val(line, "feature")
+                .or_else(|| iter_lines.peek().and_then(|next| find_attr_val(next.1, "feature")))
+            {
+                Some(name) => name,
+                None => err!("malformed stability attribute: missing `feature` key"),
+            };
+            let feature = Feature {
+                level: Status::Unstable,
+                since: None,
+                has_gate_test: false,
+                tracking_issue: find_attr_val(line, "issue").and_then(handle_issue_none),
+                file: file.to_path_buf(),
+                line: i + 1,
+                description: None,
+            };
+            mf(Ok((feature_name, feature)), file, i + 1);
+            continue;
+        }
+        let level = if line.contains("[unstable(") {
+            Status::Unstable
+        } else if line.contains("[stable(") {
+            Status::Accepted
+        } else {
+            continue;
+        };
+        let feature_name = match find_attr_val(line, "feature")
+            .or_else(|| iter_lines.peek().and_then(|next| find_attr_val(next.1, "feature")))
+        {
+            Some(name) => name,
+            None => err!("malformed stability attribute: missing `feature` key"),
+        };
+        let since = match find_attr_val(line, "since").map(|x| x.parse()) {
+            Some(Ok(since)) => Some(since),
+            Some(Err(_err)) => {
+                err!("malformed stability attribute: can't parse `since` key");
+            }
+            None if level == Status::Accepted => {
+                err!("malformed stability attribute: missing the `since` key");
+            }
+            None => None,
+        };
+        let tracking_issue = find_attr_val(line, "issue").and_then(handle_issue_none);
+
+        let feature = Feature {
+            level,
+            since,
+            has_gate_test: false,
+            tracking_issue,
+            file: file.to_path_buf(),
+            line: i + 1,
+            description: None,
+        };
+        if line.contains(']') {
+            mf(Ok((feature_name, feature)), file, i + 1);
+        } else {
+            becoming_feature = Some((feature_name, feature));
+        }
+    }
 }
 
 fn should_document(var: &str) -> bool {
