@@ -154,6 +154,25 @@ fn test_parse_unstable_feature() {
 }
 
 #[test]
+fn test_parse_multiline_unstable_feature() {
+    let source = r#"#[unstable(
+    feature = "process_exitcode_internals",
+    reason = "exposed only for libstd",
+    issue = "none"
+)]"#;
+    let results = parse(source);
+
+    assert_eq!(results.len(), 1);
+
+    let (name, feature) = results[0].as_ref().unwrap();
+    assert_eq!(name, "process_exitcode_internals");
+    assert_eq!(feature.level, Status::Unstable);
+    assert_eq!(feature.since, None);
+    assert_eq!(feature.tracking_issue, None);
+    assert_eq!(feature.line, 1);
+}
+
+#[test]
 fn test_parse_rustc_const_unstable_feature() {
     let source = r#"#[rustc_const_unstable(feature = "test", issue = "none")]"#;
     let results = parse(source);
